@@ -1,6 +1,6 @@
 """`skills/` katmanı: her SKILL.md'nin sözleşmesi ve takim.md ↔ skills bağının bütünlüğü.
 
-Ana şirketin `tests/test_skills.py` dosyasından üç takıma uyarlandı.
+Ana şirketin `tests/test_skills.py` dosyasından geri çekilme şirketine uyarlandı.
 """
 import re
 import sys
@@ -137,11 +137,10 @@ class KimlikDosyasiTesti(unittest.TestCase):
         for kisi in ("Patron", "Bekçi", "Dağıtıcı"):
             self.assertIn(kisi, metin)
 
-    def test_kimlik_dosyasi_uc_takimi_sayar(self):
+    def test_kimlik_dosyasi_her_takimi_sayar(self):
         metin = (KOK / "sirket/AJAN-KIMLIGI.md").read_text(encoding="utf-8")
-        self.assertIn("üç takımından birisin", metin)
-        for takim in ("x-icerik", "youtube-analiz", "twitter-icerik"):
-            self.assertIn(takim, metin)
+        for yol in _takim_yollari():
+            self.assertIn(f"`{yol.parent.name}`", metin)
 
 
 if __name__ == "__main__":

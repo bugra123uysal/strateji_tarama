@@ -5,8 +5,7 @@
 
 1. **Karar → sonraki adım.** Bir takımın kuyruğundaki madde "tamam" olunca zincirin devamı
    `ZINCIR` tablosundan okunur ve bir sonraki takımın kuyruğuna yazılır.
-   Tek kural: `x-icerik` bir X kaynağını "yazıya değer" bulduysa (`x-<id>`) →
-   `twitter-icerik` kuyruğuna `aci-<id>`.
+   Geri çekilme şirketinde takımlar birbirini beklemez; zincir boştur.
 2. **Kuyruk → koşu.** Kuyruğa iş düşünce bir sonraki saat tetiğini beklemez; uygun takımı hemen
    koşturur — mesaiye ve tavanlara uyarak (takım/gün 4 koşu, arası `ayar.KOSULAR_ARASI_DK` dk, şirket/gün 10 USD).
 
@@ -30,10 +29,7 @@ MALIYET_DESENI = re.compile(r"maliyet:\s*([\d.]+)\s*USD", re.IGNORECASE)
 KUYRUK_DURUMLARI = {"bekliyor", "yapiliyor", "tamam", "kacti"}
 
 # Kuyruk id deseni → sonraki takımın kuyruğu. Zincir burada, kodda değil.
-ZINCIR = [
-    {"ad": "x-yaziya-deger", "desen": re.compile(r"^x-(.+)$"), "takim": "twitter-icerik",
-     "id": "aci-{0}", "not": "x-icerik kaynağı yazıya değer buldu; article açısını çıkar"},
-]
+ZINCIR = []
 
 
 def _slug(metin):

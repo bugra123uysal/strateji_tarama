@@ -28,9 +28,8 @@ TELEMETRI = "takimlar/bekci-telemetri.jsonl"
 GUNLER = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 # Haftalık iş — sabah tetiği bu maddeyi kuyruğa düşürmezse dağıtıcı o takımı hiç başlatmaz.
-# `gun`: haftanın günü (0 = pazartesi). Hafta kimliği `youtube_analiz_cek.hafta_dosyasi` ile aynı.
-HAFTALIK = [{"takim": "youtube-analiz", "gun": 0, "id": "yt-{hafta}",
-             "not": "haftalık kanal raporu — son 7 gün"}]
+# `gun`: haftanın günü (0 = pazartesi). Hafta kimliği ISO `YYYY-Www`.
+HAFTALIK = []
 
 KOSU_ADI = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})\.md$")
 OZET_SATIRI = re.compile(r"^- maliyet:\s*([\d.]+)\s*USD\s*·\s*tur:\s*(\d+)\s*·\s*hata:\s*(\w+)", re.M)
@@ -83,7 +82,7 @@ def gunun_bekci_kararlari(kok, gun):
 
 
 def hafta_kimligi(simdi):
-    """ISO hafta: `YYYY-Www` — `bin/youtube_analiz_cek.py`'nin veri dosyası adıyla birebir aynı."""
+    """ISO hafta: `YYYY-Www` — ISO hafta kimliği."""
     yil, hafta, _ = simdi.isocalendar()
     return f"{yil}-W{hafta:02d}"
 
