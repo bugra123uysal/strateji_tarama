@@ -1,209 +1,185 @@
 #!/usr/bin/env python3
-"""Zamanlayıcı kurucusu — macOS launchd. İki tetik kurar, başka hiçbir şey yapmaz.
+"""Zamanlayıcı — Windows Görev Zamanlayıcı + New York saatine bakan tetik. LLM çağırmaz.
 
-  sabah  → `bin/gunluk.py --sabah`  · dağıtıcıyı koşturur, sabah raporunu yazar
-  akşam  → `bin/gunluk.py --aksam`  · günün koşularını ve bekçi kararlarını denetler
-
-Saatler `bin/ayar.py`'den türer (ANAYASA §4 tek yerde): sabah mesai açılışında, denetim
-mesai kapanışından bir saat önce. Bilgisayar o saatte kapalı/uykudaysa launchd kaçan işi
-açılışta koşturur — saat kaçmaz, iş kaçmaz.
+Neden böyle: Görev Zamanlayıcı yalnız yerel saati bilir. Türkiye yaz/kış saati uygulamaz (UTC+3), ABD uygular.
+16:15 New York yazın 23:15, kışın 00:15 TSİ'dir. Görev iki olası TSİ saatinin İKİSİNDE de tetiklenir;
+`--tik` o an New York saatine bakar, doğru pencerede değilse hiçbir şey yapmaz, aynı gün aynı görevi ikinci
+kez koşturmaz. Bilgisayar kapalıyken kaçan tetik açılışta koşar (StartWhenAvailable) — pencere hâlâ açıksa.
 
 Kullanım:
-  python3 bin/zamanla.py --kuru     # kurulacak plist'leri bas, hiçbir şeye dokunma
-  python3 bin/zamanla.py --kur      # plist'leri yaz ve launchd'ye yükle
-  python3 bin/zamanla.py --durum    # yüklü mü, ne zaman koşacak
-  python3 bin/zamanla.py --kaldir   # tetikleri kaldır (rapor dosyalarına dokunmaz)
+  python3 bin/zamanla.py --goster        # tetik saatleri ve yaz/kış TSİ karşılıkları (hiçbir şey kurmaz)
+  python3 bin/zamanla.py --kur           # Windows görevlerini kur (GeriCekilme\\gc-tarama, GeriCekilme\\gc-gunluk)
+  python3 bin/zamanla.py --kaldir        # görevleri sil
+  python3 bin/zamanla.py --durum         # kurulu görevler
+  python3 bin/zamanla.py --tik           # görevlerin çağırdığı giriş: New York saatine göre gc-tarama
+  python3 bin/zamanla.py --gunluk        # görevlerin çağırdığı giriş: gc-gunluk
 """
-import hashlib
-import os
-import plistlib
-import shutil
+import json
 import subprocess
 import sys
+import tempfile
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ayar  # noqa: E402
+import gc_hesap as h  # noqa: E402
 
-KOK = ayar.KOK
-AJANLAR = Path.home() / "Library" / "LaunchAgents"
-ON_EK = "com.a-sirketi"
-LOG = "sirket-log/zamanlayici.log"
+NY = ZoneInfo(ayar.PIYASA_SAAT_DILIMI)
+TSI = ZoneInfo("Europe/Istanbul")
+KLASOR = "GeriCekilme"
+KAYIT = ayar.KOK / "sirket-log" / "tetik.json"
 
-# Etiket köke bağlıdır: iki klon aynı launchd kaydını ele geçirmesin (klasör adı + yol hash'i).
-# `com.a-sirketi.<klasor>-<hash6>.<tetik>`. Eski sürüm köksüz `com.a-sirketi.<tetik>` kullanırdı;
-# `--durum` onu görürse "eski etiket" diye raporlar, kendiliğinden kaldırmaz.
-IMZA_UZUNLUGU = 6
-
-# Saatler ayar.py'den türer; ikinci bir yerde sayı yazmaz.
-TETIKLER = [
-    {"ad": "sabah", "saat": ayar.MESAI_BASLANGIC, "dakika": 0, "bayrak": "--sabah",
-     "ne": "dağıtıcı + sabah raporu"},
-    {"ad": "aksam", "saat": ayar.MESAI_BITIS - 1, "dakika": 0, "bayrak": "--aksam",
-     "ne": "günün koşuları + bekçi kararları"},
-]
+# New York saatine göre pencereler: [başlangıç, bitiş). Başlangıç = asıl koşu saati.
+PENCERELER = {"acilis": (time(9, 0), time(9, 30)),      # premarket; açılıştan (09:30) önce bitmeli
+              "kapanis": (time(16, 15), time(23, 59))}  # kapanmış bar; gece yarısına kadar telafi
+# Görev Zamanlayıcı tetikleri (TSİ): her New York saati için yaz (EDT) ve kış (EST) karşılığı.
+TSI_TETIKLER = sorted({(datetime.combine(g, bas, NY).astimezone(TSI)).strftime("%H:%M")
+                       for bas, _ in PENCERELER.values() for g in (date(2026, 7, 1), date(2026, 12, 1))})
+GUNLUK_TETIK = ("MON", "09:30")                          # gc-gunluk: pazartesi 09:30 TSİ
 
 
-def _yol_degeri():
-    """launchd'nin dar PATH'i `claude`'u bulamaz; bulunduğu dizin öne eklenir."""
-    dizinler = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin", "/opt/homebrew/bin",
-                str(Path.home() / ".local" / "bin")]
-    claude = shutil.which("claude")
-    if claude:
-        dizinler.insert(0, str(Path(claude).parent))
-    return ":".join(dict.fromkeys(dizinler))
-
-
-def kok_imzasi(kok=None):
-    """Kökü tek kelimeyle tanıtan imza: `<klasor>-<hash6>`. Aynı adlı iki klon çakışmaz."""
-    yol = Path(kok or KOK).resolve()
-    ozet = hashlib.sha1(str(yol).encode("utf-8")).hexdigest()[:IMZA_UZUNLUGU]
-    return f"{yol.name}-{ozet}"
-
-
-def etiket(ad, kok=None):
-    return f"{ON_EK}.{kok_imzasi(kok)}.{ad}"
-
-
-def eski_etiket(ad):
-    """Köksüz eski etiket — yalnızca teşhis için; `--kur`/`--kaldir` buna dokunmaz."""
-    return f"{ON_EK}.{ad}"
-
-
-def plist_yolu(ad, kok=None):
-    return AJANLAR / f"{etiket(ad, kok)}.plist"
-
-
-def _plist_programi(yol):
-    """plist'in çalıştırdığı betiğin yolu; dosya yoksa/bozuksa None."""
-    try:
-        with open(yol, "rb") as dosya:
-            argv = plistlib.load(dosya).get("ProgramArguments") or []
-    except (OSError, ValueError, plistlib.InvalidFileException):
+def ny_gorevi(simdi):
+    """`simdi` (zaman dilimli) anında New York'ta hangi gc-tarama görevi koşmalı? Yoksa None."""
+    ny = simdi.astimezone(NY)
+    if not h.isgunu_mu(ny.date()):
         return None
-    return argv[1] if len(argv) > 1 else None
+    for gorev, (bas, son) in PENCERELER.items():
+        if bas <= ny.time() < son:
+            return gorev
+    return None
 
 
-def plist_icerigi(tetik, kok=None, python=None):
-    """Tek bir tetiğin plist sözlüğü. RunAtLoad yok — kurulum anında koşu başlatmaz."""
-    kok = Path(kok or KOK)
+def kayit_oku(yol=KAYIT):
+    try:
+        return json.loads(Path(yol).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def tik(simdi=None, kostur=None, yol=KAYIT):
+    """Tetik girişi. (sonuç, açıklama) döner; aynı New York gününde aynı görev bir kez koşar."""
+    simdi = simdi or datetime.now(timezone.utc)
+    gorev = ny_gorevi(simdi)
+    ny = simdi.astimezone(NY)
+    if gorev is None:
+        return "bos", f"New York {ny:%a %H:%M} — pencere dışı ya da tatil"
+    if not ayar.mesaide_mi(simdi.astimezone(TSI)):
+        # kos.py mesai dışında koşuyu atlar; kayıt düşülürse o günün görevi sessizce kaybolur
+        return "bos", f"New York {ny:%a %H:%M} — {gorev} penceresi açık ama TSİ mesai dışı ({ayar.MESAI_METNI})"
+    anahtar = f"{ny.date().isoformat()}:{gorev}"
+    kayit = kayit_oku(yol)
+    if anahtar in kayit:
+        return "tekrar", f"{anahtar} zaten koştu ({kayit[anahtar]})"
+    Path(yol).parent.mkdir(parents=True, exist_ok=True)
+    Path(yol).write_text(json.dumps({**kayit, anahtar: simdi.astimezone(TSI).isoformat(timespec="seconds")},
+                                    ensure_ascii=False, indent=1), encoding="utf-8")
+    (kostur or _kostur)(["gc-tarama", "--gorev", gorev])
+    return "kostu", f"{anahtar} başlatıldı"
+
+
+def _kostur(argv):
+    subprocess.run([sys.executable, str(ayar.KOK / "bin" / "kos.py"), *argv], cwd=str(ayar.KOK), check=False)
+
+
+# --- Windows Görev Zamanlayıcı --------------------------------------------------
+
+def _gorev_xml(aciklama, tetikler, arguman):
+    tetik_xml = "".join(tetikler)
+    return f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>{aciklama}</Description></RegistrationInfo>
+  <Triggers>{tetik_xml}</Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec><Command>"{sys.executable}"</Command><Arguments>"{ayar.KOK / 'bin' / 'zamanla.py'}" {arguman}</Arguments>
+      <WorkingDirectory>{ayar.KOK}</WorkingDirectory></Exec>
+  </Actions>
+</Task>
+"""
+
+
+def _gunluk_tetik(saat):
+    return (f"<CalendarTrigger><StartBoundary>2026-01-01T{saat}:00</StartBoundary>"
+            f"<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>")
+
+
+def gorevler():
+    gun, saat = GUNLUK_TETIK
+    haftalik = (f"<CalendarTrigger><StartBoundary>2026-01-05T{saat}:00</StartBoundary><ScheduleByWeek>"
+                f"<DaysOfWeek><Monday /></DaysOfWeek><WeeksInterval>1</WeeksInterval></ScheduleByWeek></CalendarTrigger>")
     return {
-        "Label": etiket(tetik["ad"], kok),
-        "ProgramArguments": [python or sys.executable, str(kok / "bin" / "gunluk.py"), tetik["bayrak"]],
-        "WorkingDirectory": str(kok),
-        "EnvironmentVariables": {"PATH": _yol_degeri()},
-        "StartCalendarInterval": {"Hour": tetik["saat"], "Minute": tetik["dakika"]},
-        "StandardOutPath": str(kok / LOG),
-        "StandardErrorPath": str(kok / LOG),
-        "RunAtLoad": False,
-        "ProcessType": "Background",
+        f"{KLASOR}\\gc-tarama": _gorev_xml(
+            "gc-tarama: 09:00 ve 16:15 New York — TSİ karşılıkları yaz/kış için ikişer tetik, "
+            "karar zamanla.py --tik'te", [_gunluk_tetik(s) for s in TSI_TETIKLER], "--tik"),
+        f"{KLASOR}\\gc-gunluk": _gorev_xml("gc-gunluk: pazartesi 09:30 TSİ", [haftalik], "--gunluk"),
     }
 
 
-def _launchctl(*argv):
-    """launchctl çağrısı — (kod, çıktı). launchd yoksa ya da hata verirse istisna fırlatmaz."""
-    try:
-        sonuc = subprocess.run(["launchctl", *argv], capture_output=True, text=True, timeout=20)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return 1, f"launchctl çağrılamadı: {type(exc).__name__}"
-    return sonuc.returncode, (sonuc.stdout + sonuc.stderr).strip()
+def _schtasks(*argv):
+    return subprocess.run(["schtasks", *argv], capture_output=True, text=True, encoding="mbcs", errors="replace")
 
 
-def _hedef():
-    return f"gui/{os.getuid()}"
+def kur():
+    for ad, xml in gorevler().items():
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-16") as dosya:
+            dosya.write(xml)
+        sonuc = _schtasks("/Create", "/TN", ad, "/XML", dosya.name, "/F")
+        Path(dosya.name).unlink(missing_ok=True)
+        print(f"{ad}: {'kuruldu' if sonuc.returncode == 0 else 'HATA — ' + (sonuc.stderr or sonuc.stdout).strip()}")
 
 
-def kur(kok=None):
-    """plist'leri yazar ve yükler. Her tetik için (ad, yol, mesaj) döner."""
-    AJANLAR.mkdir(parents=True, exist_ok=True)
-    (Path(kok or KOK) / LOG).parent.mkdir(parents=True, exist_ok=True)
-    sonuclar = []
-    for tetik in TETIKLER:
-        yol = plist_yolu(tetik["ad"], kok)
-        with open(yol, "wb") as dosya:
-            plistlib.dump(plist_icerigi(tetik, kok), dosya)
-        _launchctl("bootout", f"{_hedef()}/{etiket(tetik['ad'], kok)}")   # varsa önce indir
-        kod, cikti = _launchctl("bootstrap", _hedef(), str(yol))
-        sonuclar.append({"ad": tetik["ad"], "yol": yol,
-                         "mesaj": "yüklendi" if kod == 0 else f"yüklenemedi: {cikti or kod}"})
-    return sonuclar
+def kaldir():
+    for ad in gorevler():
+        sonuc = _schtasks("/Delete", "/TN", ad, "/F")
+        print(f"{ad}: {'silindi' if sonuc.returncode == 0 else 'yok'}")
 
 
-def kaldir(kok=None):
-    sonuclar = []
-    for tetik in TETIKLER:
-        kod, cikti = _launchctl("bootout", f"{_hedef()}/{etiket(tetik['ad'], kok)}")
-        yol = plist_yolu(tetik["ad"], kok)
-        vardi = yol.exists()
-        yol.unlink(missing_ok=True)
-        sonuclar.append({"ad": tetik["ad"], "yol": yol,
-                         "mesaj": "kaldırıldı" if (kod == 0 or vardi) else f"zaten yoktu ({cikti or kod})"})
-    return sonuclar
+def durum():
+    for ad in gorevler():
+        sonuc = _schtasks("/Query", "/TN", ad, "/FO", "LIST")
+        print(sonuc.stdout.strip() if sonuc.returncode == 0 else f"{ad}: kurulu değil")
 
 
-def durum(kok=None):
-    """Her tetik için: bu köke ait mi, yüklü mü, eski etiketle yüklü bir kalıntı var mı."""
-    kok = Path(kok or KOK)
-    bin_dizini = str((kok / "bin").resolve())
-    sonuclar = []
-    for tetik in TETIKLER:
-        yol = plist_yolu(tetik["ad"], kok)
-        program = _plist_programi(yol)
-        # sembolik bağ farkı yanıltmasın: iki taraf da çözülerek karşılaştırılır
-        baska = program if (program and not str(Path(program).resolve()).startswith(bin_dizini)) else None
-        kod, _ = _launchctl("print", f"{_hedef()}/{etiket(tetik['ad'], kok)}")
-        eski = eski_etiket(tetik["ad"])
-        eski_kod, _ = _launchctl("print", f"{_hedef()}/{eski}")
-        eski_yol = AJANLAR / f"{eski}.plist"
-        sonuclar.append({**tetik, "etiket": etiket(tetik["ad"], kok),
-                         "yuklu": kod == 0 and baska is None, "plist": yol.exists(),
-                         "baska_kok": baska, "eski_etiket": eski,
-                         "eski_yuklu": eski_kod == 0 or eski_yol.exists(),
-                         "eski_kok": _plist_programi(eski_yol)})
-    return sonuclar
-
-
-def _eski_etiket_uyarisi():
-    """Köksüz eski etiket hâlâ duruyorsa söyle — kaldırmak insanın kararı."""
-    for tetik in TETIKLER:
-        eski = eski_etiket(tetik["ad"])
-        if (AJANLAR / f"{eski}.plist").exists() or _launchctl("print", f"{_hedef()}/{eski}")[0] == 0:
-            print(f"⚠ eski etiket {eski} hâlâ yüklü — çift tetik olmasın diye kaldır: "
-                  f"launchctl bootout {_hedef()}/{eski}")
+def goster(bugun=None):
+    """Yaz/kış geçişinde New York saatlerinin TSİ karşılığı ve hangi tetiğin koşacağı."""
+    bugun = bugun or datetime.now(TSI).date()
+    ornekler = [date(2026, 10, 30), date(2026, 11, 2), date(2027, 3, 12), date(2027, 3, 15), bugun]
+    print(f"Tetikler (TSİ, her gün): {', '.join(TSI_TETIKLER)} · gc-gunluk: pazartesi {GUNLUK_TETIK[1]} TSİ\n")
+    print("New York günü    | açılış 09:00 NY → TSİ | kapanış 16:15 NY → TSİ | TSİ tetiklerinde karar")
+    for gun in ornekler:
+        ac = datetime.combine(gun, PENCERELER["acilis"][0], NY).astimezone(TSI)
+        kp = datetime.combine(gun, PENCERELER["kapanis"][0], NY).astimezone(TSI)
+        kararlar = []
+        for s in TSI_TETIKLER:
+            saat, dakika = map(int, s.split(":"))
+            an = datetime.combine(gun + timedelta(days=1 if saat < 9 else 0), time(saat, dakika), TSI)
+            kararlar.append(f"{s}→{ny_gorevi(an) or '-'}")
+        print(f"{gun} {gun:%a}   | {ac:%H:%M} ({ac:%d.%m})         | {kp:%H:%M} ({kp:%d.%m})          | "
+              + " ".join(kararlar))
 
 
 def main(argv):
-    if "--kuru" in argv:
-        for tetik in TETIKLER:
-            print(f"--- {etiket(tetik['ad'])} · her gün {tetik['saat']:02d}:{tetik['dakika']:02d} "
-                  f"· {tetik['ne']}")
-            print(plistlib.dumps(plist_icerigi(tetik)).decode("utf-8"))
-        print("(kuru koşu: hiçbir dosya yazılmadı, launchd'ye dokunulmadı)")
+    komutlar = {"--goster": goster, "--kur": kur, "--kaldir": kaldir, "--durum": durum}
+    for bayrak, is_ in komutlar.items():
+        if bayrak in argv:
+            is_()
+            return 0
+    if "--tik" in argv:
+        sonuc, aciklama = tik()
+        print(f"tetik: {sonuc} — {aciklama}")
         return 0
-    if "--kur" in argv:
-        for s in kur():
-            print(f"{s['ad']:<6} {s['mesaj']} — {s['yol']}")
-        _eski_etiket_uyarisi()
-        return 0
-    if "--kaldir" in argv:
-        for s in kaldir():
-            print(f"{s['ad']:<6} {s['mesaj']}")
-        _eski_etiket_uyarisi()
-        return 0
-    if "--durum" in argv:
-        print(f"etiket: {ON_EK}.{kok_imzasi()}.<tetik>  ({KOK})")
-        for s in durum():
-            if s["baska_kok"]:
-                isaret = f"· başka kök için yüklü: {s['baska_kok']}"
-            elif s["yuklu"]:
-                isaret = "✓ yüklü"
-            else:
-                isaret = "· plist var, yüklü değil" if s["plist"] else "· kurulu değil"
-            print(f"{s['ad']:<6} her gün {s['saat']:02d}:{s['dakika']:02d}  {isaret:<40} {s['ne']}")
-            if s["eski_yuklu"]:
-                nere = f" (→ {s['eski_kok']})" if s["eski_kok"] else ""
-                print(f"       ⚠ eski etiket {s['eski_etiket']} yüklü{nere} — "
-                      f"`python3 bin/zamanla.py --kur` ile yenile")
+    if "--gunluk" in argv:
+        _kostur(["gc-gunluk"])
         return 0
     print(__doc__)
     return 2

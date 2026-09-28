@@ -1,10 +1,10 @@
 ---
 name: kaynak-dogrulama
-description: Bir X yazısı, makale ya da video transkriptindeki iddiaları tek tek birincil kaynağa kadar açıp ✅/🟡/⛔ ile sınıflar; "ölçmeden sayı söyleme, doğrulamadan atıf yapma" kuralının araç hâli. X içerik ve twitter içerik takımları kullanır.
+description: Bir haber, şirket duyurusu ya da makaledeki iddiaları tek tek birincil kaynağa kadar açıp ✅/🟡/⛔ ile sınıflar; "ölçmeden sayı söyleme, doğrulamadan atıf yapma" kuralının araç hâli. gc-tarama takımı aday haberlerini etiketlerken kullanır.
 kaynak: A Şirketi kitinin kendi üretimi — dış kaynak yok
 lisans: —
 uyarlayan: A Şirketi (2026-09-11)
-takimlar: [x-icerik, twitter-icerik]
+takimlar: [gc-tarama]
 ---
 
 # Kaynak doğrulama

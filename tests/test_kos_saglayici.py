@@ -135,6 +135,12 @@ class NimYoluTesti(unittest.TestCase):
 
 
 class KomutTesti(unittest.TestCase):
+    def test_istem_argv_de_degil(self):
+        """Windows'ta claude.cmd çok satırlı argv'yi bozar; istem stdin ile gider."""
+        komut = kos.claude_komutu("çok\nsatırlı istem", ["Read"], 2)
+        self.assertNotIn("çok\nsatırlı istem", komut)
+        self.assertEqual(komut[1], "-p")
+
     def test_claude_komutu_modeli_oldugu_gibi_tasir(self):
         komut = kos.claude_komutu("merhaba", ["Read"], 2, "meta/llama-3.3-70b-instruct")
         self.assertIn("--model", komut)
@@ -226,3 +232,12 @@ class ProxyDurumTesti(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MaliyetBayraklariTesti(unittest.TestCase):
+    def test_mcp_kapali_ve_yalniz_takim_araclari(self):
+        komut = kos.claude_komutu("x", ["Read", "Bash(python3 bin/a.py *)", "Bash(python3 bin/b.py *)",
+                                        "WebSearch"], 1)
+        self.assertIn("--strict-mcp-config", komut)
+        self.assertEqual(komut[komut.index("--tools") + 1], "Read,Bash,WebSearch")
+        self.assertIn("Bash(python3 bin/a.py *)", komut[komut.index("--allowedTools") + 1])

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Koşu sürücüsü — bir takımı bir kez koşturur.
 
-Kullanım: python3 bin/kos.py <takim> [--kuru] [--zorla]
+Kullanım: python3 bin/kos.py <takim> [--kuru] [--zorla] [--gorev <ad>]
 
 Akış: .env → repo kilidi → mesai kontrolü → agents üret → anahtar kontrolü → istem kur
       (kimlik + okuma sırası + yetenekler) → `claude -p` (bütçe + süre tavanı) → koşu kaydı →
@@ -11,12 +11,17 @@ Akış: .env → repo kilidi → mesai kontrolü → agents üret → anahtar ko
 `--zorla` mesai kontrolünü atlar (insanın elle tetiği).
 Çıkış kodu her zaman 0; sonuç `durum.json`'daki `son_sonuc` alanındadır.
 """
-import fcntl
 import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+
+if os.name == "nt":  # Windows: fcntl yok, msvcrt bayt kilidi kullanılır
+    import msvcrt
+else:
+    import fcntl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agents_uret  # noqa: E402
@@ -44,11 +49,11 @@ def _kimlik(takim, fm, kok=None):
     """İstemin ilk satırı: kim olduğun ve mesleğin. Eksik alanlar takim.md'den tamamlanır."""
     dolu = fm if fm.get("description") and fm.get("skills") is not None else {
         **(ayar.takim_bilgisi(takim, kok) or {}), **fm}
-    return dolu, (f"Sen `{takim}` ajanısın. A Şirketi'nde bir çalışansın ve bir yapay zekâ ajanısın. "
+    return dolu, (f"Sen `{takim}` ajanısın. Geri Çekilme Şirketi'nde bir çalışansın ve bir yapay zekâ ajanısın. "
                   f"Mesleğin: {agents_uret.meslek_metni(dolu)}")
 
 
-def istem(takim, fm, kosu, zaman, kok=None):
+def istem(takim, fm, kosu, zaman, kok=None, gorev=None):
     """Ajanın göreceği tek metin: kimlik + okuma sırası + yetenekler + koşu kaydı sözleşmesi + takıma özel istem."""
     ozel = Path(kok or KOK) / "bin" / f"prompt-{takim}.md"
     govde = ozel.read_text(encoding="utf-8") if ozel.exists() else ""
@@ -68,7 +73,9 @@ def istem(takim, fm, kosu, zaman, kok=None):
         f"Koşu kaydını mutlaka şu dosyaya yaz (ortamdaki SIRKET_KOSU ile aynı): "
         f"`{_goreli(kosu, kok)}`. Kayıt yoksa koşu bekçi tarafından reddedilir.\n"
         f"Bütçe {fm.get('butce_usd', ayar.KOSU_BUTCESI_USD)} USD, süre "
-        f"{ayar.KOSU_SURESI_SN // 60} dk. Bitince tek paragraf özet döndür.\n\n{govde}")
+        f"{ayar.KOSU_SURESI_SN // 60} dk. Bitince tek paragraf özet döndür.\n"
+        + (f"Bu koşunun görevi: **{gorev}** — takim.md'de yalnız bu görevin adımlarını uygula.\n" if gorev else "")
+        + f"\n{govde}")
 
 
 NIM_PROXY_VARSAYILAN = ayar.NIM_PROXY_URL
@@ -116,8 +123,17 @@ def saglayici_ortami(fm, temel):
             "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1"}, model
 
 
+def temel_araclar(araclar):
+    """`Bash(python3 bin/x.py *)` → `Bash`: --tools yerleşik araç adı ister, izin kalıbı --allowedTools'ta kalır."""
+    return list(dict.fromkeys(a.split("(", 1)[0].strip() for a in araclar if a.strip()))
+
+
 def claude_komutu(metin, araclar, butce_usd, model="sonnet"):
-    return ["claude", "-p", metin, "--output-format", "json", "--model", model,
+    """İstem (`metin`) argv'de değil stdin'dedir — `_claude_kos` `input=` ile verir.
+    Maliyet: kullanıcının MCP sunucuları (--strict-mcp-config) ve takımın kullanmadığı yerleşik araçlar
+    (--tools) yüklenmez; ölçüm 2026-09-28: sabit bağlam 44,9k → 26,7k token."""
+    return [ayar.claude_yolu(), "-p", "--output-format", "json", "--model", model,
+            "--strict-mcp-config", "--tools", ",".join(temel_araclar(araclar)),
             "--max-budget-usd", str(butce_usd), "--allowedTools", ",".join(araclar),
             "--permission-mode", "acceptEdits"]
 
@@ -148,12 +164,15 @@ def _claude_kos(metin, fm, takim, kosu):
     """claude -p çağrısı. Süre/başlatma hataları da sözlük olarak döner, istisna fırlatmaz."""
     temel = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}  # iç içe koşu engeli
     ortam, model = saglayici_ortami(fm, temel)
-    ortam = {**ortam, "SIRKET_TAKIM": takim, "SIRKET_KOSU": str(kosu)}
+    # Ajanın çağırdığı python betiklerinin çıktısı UTF-8 olsun (Windows varsayılanı cp1254).
+    # PYTHONUTF8=1 KULLANILMAZ: kullanıcı yolundaki 'Ğ' yüzünden yfinance (curl) her sembolü boş döndürür.
+    ortam = {**ortam, "SIRKET_TAKIM": takim, "SIRKET_KOSU": str(kosu), "PYTHONIOENCODING": "utf-8"}
+    ortam.pop("PYTHONUTF8", None)
     araclar = fm.get("tools") or ["Read", "Write", "Glob", "Grep"]
     komut = claude_komutu(metin, araclar, fm.get("butce_usd", ayar.KOSU_BUTCESI_USD), model)
     try:
-        sonuc = subprocess.run(komut, cwd=str(KOK), capture_output=True, text=True,
-                               timeout=ayar.KOSU_SURESI_SN, env=ortam)
+        sonuc = subprocess.run(komut, cwd=str(KOK), input=metin, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=ayar.KOSU_SURESI_SN, env=ortam)
     except subprocess.TimeoutExpired:
         return {"hata": True, "maliyet": 0.0, "tur": 0, "metin": "süre tavanı aşıldı"}
     except OSError as exc:
@@ -171,14 +190,19 @@ def _bekci_kosmus_mu(kosu):
         return False
 
 
-def _sonuc_belirle(cozum, takim, kosu):
-    """Bekçi Stop hook'ta koşmadıysa doğrudan çağrılır; karar 'red' ise koşu 'red' biter."""
+def _sonuc_belirle(cozum, takim, kosu, zaman):
+    """Bekçi Stop hook'ta koşmadıysa doğrudan çağrılır; karar 'red' ise koşu 'red' biter.
+    Ajan bu koşu için durum.json'a 'hata' yazdıysa (ör. veri betiği çöktü) 'tamam' ile ezilmez."""
     if cozum["hata"]:
         return "hata"
     if not _bekci_kosmus_mu(kosu):
         bekci.denetle(KOK, takim, kosu)
-    karar = (ayar.durum_oku(takim).get("bekci") or {}).get("son_karar")
-    return "red" if karar == "red" else "tamam"
+    durum = ayar.durum_oku(takim)
+    if (durum.get("bekci") or {}).get("son_karar") == "red":
+        return "red"
+    if durum.get("son_kosu") == zaman and durum.get("son_sonuc") == "hata":
+        return "hata"
+    return "tamam"
 
 
 def _kuru_bas(takim, fm, kosu, zaman, metin):
@@ -201,14 +225,14 @@ def _kuru_bas(takim, fm, kosu, zaman, metin):
     print("  → claude çağrılmadı, hiçbir dosya yazılmadı.")
 
 
-def kos(takim, kuru=False, zorla=False):
+def kos(takim, kuru=False, zorla=False, gorev=None):
     zaman = ayar.simdi_iso()
     fm = ayar.takim_bilgisi(takim)
     if fm is None:
         print(f"takım yok: {takim}")
         return 0
     kosu = kosu_yolu(takim, zaman)
-    metin = istem(takim, fm, kosu, zaman)
+    metin = istem(takim, fm, kosu, zaman, gorev=gorev)
     if kuru:
         _kuru_bas(takim, fm, kosu, zaman, metin)
         if not ayar.mesaide_mi():
@@ -235,10 +259,43 @@ def kos(takim, kuru=False, zorla=False):
         cozum = {**cozum, "hata": True}
     with open(kosu, "a", encoding="utf-8") as dosya:
         dosya.write(f"\n\n---\n- maliyet: {cozum['maliyet']:.3f} USD · tur: {cozum['tur']} · hata: {cozum['hata']}\n")
-    sonuc = _sonuc_belirle(cozum, takim, kosu)
+    sonuc = _sonuc_belirle(cozum, takim, kosu, zaman)
     ayar.durum_guncelle(takim, {"son_kosu": zaman, "son_sonuc": sonuc})
     print(f"{takim}: {sonuc} · {cozum['maliyet']:.3f} USD · {kosu.relative_to(KOK)}")
     return 0
+
+
+@contextmanager
+def repo_kilidi(yol=None):
+    """Repo çapında dışlayıcı kilit; ikinci koşu birincinin bitmesini bekler. POSIX'te flock,
+    Windows'ta msvcrt.locking (1 bayt, bloklayan — 10 sn'de bir yeniden dener)."""
+    with open(yol or KOK / ".kos.lock", "a+") as kilit:
+        if os.name == "nt":
+            kilit.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(kilit.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    continue
+            try:
+                yield
+            finally:
+                kilit.seek(0)
+                msvcrt.locking(kilit.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(kilit, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(kilit, fcntl.LOCK_UN)
+
+
+def _gorev(argv):
+    """`--gorev <ad>` (ör. kapanis, acilis) — zamanlayıcı aynı takımı farklı işlerle koşturur."""
+    if "--gorev" in argv and argv.index("--gorev") + 1 < len(argv):
+        return argv[argv.index("--gorev") + 1]
+    return None
 
 
 def main(argv):
@@ -246,13 +303,9 @@ def main(argv):
         print(__doc__)
         return 2
     if "--kuru" in argv:  # kuru koşu hiçbir şeye dokunmaz, kilide de girmez
-        return kos(argv[0], kuru=True)
-    with open(KOK / ".kos.lock", "w") as kilit:  # aynı anda iki koşu olmasın
-        fcntl.flock(kilit, fcntl.LOCK_EX)
-        try:
-            return kos(argv[0], zorla="--zorla" in argv)
-        finally:
-            fcntl.flock(kilit, fcntl.LOCK_UN)
+        return kos(argv[0], kuru=True, gorev=_gorev(argv))
+    with repo_kilidi():  # aynı anda iki koşu olmasın
+        return kos(argv[0], zorla="--zorla" in argv, gorev=_gorev(argv))
 
 
 if __name__ == "__main__":

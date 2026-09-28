@@ -48,7 +48,7 @@ class AgentsUretTesti(unittest.TestCase):
         cikti = au.agent_metni("deneme", ORNEK)
         ilk = cikti.split("---\n", 2)[2].lstrip().splitlines()[0]
         self.assertTrue(ilk.startswith("> **Sen `deneme` ajanısın.**"), ilk)
-        self.assertIn("A Şirketi'nde bir çalışansın", ilk)
+        self.assertIn("Geri Çekilme Şirketi'nde bir çalışansın", ilk)
         self.assertIn("bir yapay zekâ ajanısın", ilk)
         self.assertIn("Mesleğin: Deneme takımı — test.", ilk)
 
@@ -101,8 +101,10 @@ class AgentsUretTesti(unittest.TestCase):
             (kok / "takimlar/_iskelet/takim.md").write_text(ORNEK, encoding="utf-8")
             self.assertEqual(au.uret(kok), [])
 
-    def test_repodaki_uc_takim_uretilebiliyor(self):
-        for takim in ("x-icerik", "youtube-analiz", "twitter-icerik"):
+    def test_repodaki_takimlar_uretilebiliyor(self):
+        takimlar = sorted(y.parent.name for y in (KOK / "takimlar").glob("*/takim.md")
+                          if not y.parent.name.startswith("_"))
+        for takim in takimlar:
             with self.subTest(takim=takim):
                 ham = (KOK / "takimlar" / takim / "takim.md").read_text(encoding="utf-8")
                 cikti = au.agent_metni(takim, ham)

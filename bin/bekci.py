@@ -127,9 +127,10 @@ def haiku_sor(istem):
     ek = ('\n\nYalnızca şu JSON\'u döndür: {"karar":"kabul|red","gerekce":"...",'
           '"ihlal_edilen_kural":"..."|null}')
     try:
-        sonuc = subprocess.run(["claude", "-p", istem + ek, "--model", "haiku", "--output-format",
+        sonuc = subprocess.run([ayar.claude_yolu(), "-p", "--model", "haiku", "--output-format",
                                 "json", "--max-budget-usd", "0.2", "--allowedTools", ""],
-                               capture_output=True, text=True, timeout=150, env=ortam)
+                               input=istem + ek, capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=150, env=ortam)
         metin = json.loads(sonuc.stdout).get("result", "")
     except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
         return {"karar": "atlandi", "gerekce": f"yedek bekçi ulaşılamadı: {type(exc).__name__}",
