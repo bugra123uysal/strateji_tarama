@@ -1,0 +1,37 @@
+# liste: bolingir e değenler
+# TradingView izleme listesinin kopyası — kapanış taraması bu hisseleri de strateji hesabından geçirir,
+# panoda "İzleme listesi" bölümünde gösterir. Kural değil, bilgi; evren "…cuma cevik_üzerine_deneme" takipçisidir.
+# TradingView'de listeyi değiştirince burayı da güncelle (Claude'a "izleme listesini eşitle" demen yeterli).
+# Her satırda bir sembol, BORSA:SEMBOL biçiminde. Son eşitleme: 2026-09-29 (TradingView'den, 32 sembol).
+NYSE:IONQ
+NASDAQ:AAOI
+NASDAQ:MU
+NASDAQ:SNDK
+NASDAQ:LITE
+NASDAQ:ALAB
+NASDAQ:MRVL
+NYSE:DELL
+NASDAQ:RKLB
+NASDAQ:CRDO
+NASDAQ:META
+NASDAQ:COIN
+NASDAQ:AVGO
+AMEX:SOXL
+NASDAQ:NVDA
+NASDAQ:TSLA
+NASDAQ:SPCX
+NASDAQ:INTC
+NASDAQ:AMD
+NASDAQ:GOOGL
+NYSE:BE
+NASDAQ:NBIS
+NASDAQ:EOSE
+NASDAQ:PLTR
+NASDAQ:CRWV
+NASDAQ:ASML
+NASDAQ:SKHY
+NYSE:TSM
+NYSE:GLW
+NASDAQ:CSCO
+NASDAQ:CEG
+NYSE:TE
