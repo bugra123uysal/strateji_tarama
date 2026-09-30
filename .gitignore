@@ -13,3 +13,11 @@ takimlar/*/veri/
 *.canvas
 .DS_Store
 sirket/model-proxy/
+
+# kişisel işlem verisi — repoya girmez
+pozisyonlar.csv
+islemler.csv
+evren/*.csv
+geri-test/onbellek/
+takimlar/*/notlar/
+kasa/.obsidian/workspace*.json
