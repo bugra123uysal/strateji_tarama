@@ -1,0 +1,17 @@
+{
+  "takim": "gc-gunluk",
+  "son_kosu": "2026-10-05T11:22:39+03:00",
+  "son_sonuc": "tamam",
+  "kuyruk": [],
+  "bekci": {
+    "son_karar": "kabul",
+    "red_sayisi_7g": 1,
+    "gerekce": "[bekçi aynı aileden — uyarı] Koşu kaydı tüm kontrol noktalarını karşılıyor: (1) kaynaksız sayı yok — tüm rakamlar JSON dosyasından ya da koşunun kendi ölçümü; (2) kişi adı/e-posta/anahtar yok; (3) ANAYASA § 7 — kural önerisi yalnız defterde; (4) kurallar.md asla yapmaz — sayı hesaplama/değiştirme/kural notu yok, yönlendirici cümle yok; (5) çıktı kalite ölçütleri tümü karşılandı: strateji sürümü başlıkta, notteki sayılar JSON'da birebir, belirgin_kotu uyarısı gerekmedi, örneklem < 30 notu yer aldı, kural dışı liste boş; (6) mesai saati içinde (11:22 TSİ), maliyet 0.4 USD limit içinde; (7) sosyal hesap yazması yok, yayınlama yok.",
+    "zaman": "2026-10-05T11:26:43+03:00"
+  },
+  "defter_son_ders": "2026-10-05: islemler.csv ikinci haftadır boş; boş hafta notu kısa tutulur, referans alınan geri test dosyası ve strateji sürümü notta açıkça yazılır.",
+  "sayaclar": {
+    "hafta_2026-W40_islem": 0,
+    "hafta_2026-W41_islem": 0
+  }
+}
