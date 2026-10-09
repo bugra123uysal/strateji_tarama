@@ -1,0 +1,15 @@
+{
+  "takim": "gc-tarama",
+  "son_kosu": "2026-10-09T23:15:02+03:00",
+  "son_sonuc": "tamam",
+  "kuyruk": [],
+  "bekci": {
+    "son_karar": "kabul",
+    "red_sayisi_7g": 6,
+    "gerekce": "(madde 3/4 gerekçeli red geçersiz sayıldı — sürücünün kuralı) [bekçi aynı aileden — uyarı] Kanıt eksik. (1) Pano sayılarının veri JSON'u ile birebir eşleştiği doğrulanmadı: ajan veri/2026-10-09.json dosyasını okumadı, yalnızca özet dosyasından ve terminal çıktısından yazdı, ve 'satır satır karşılaştırılmadı' diye kendisi belirtti. (2) SANM ve GH uygun adayları",
+    "zaman": "2026-10-09T23:18:42+03:00"
+  },
+  "defter_son_ders": "2026-10-09",
+  "sayaclar": {},
+  "engel_tekrar": null
+}
