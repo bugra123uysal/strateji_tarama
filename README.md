@@ -183,8 +183,8 @@ kullanılır. Raporlar [`geri-test/`](geri-test/) klasöründe, sürüm kararlar
 **Gereksinimler:** Windows 10/11, Python 3.10+, giriş yapılmış [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI.
 
 ```powershell
-git clone https://github.com/bugra123uysal/geri-cekilme-tarayicisi.git
-cd geri-cekilme-tarayicisi
+git clone https://github.com/bugra123uysal/strateji_tarama.git
+cd strateji_tarama
 python -m pip install --user -r requirements.txt
 copy .env.example .env      # isteğe bağlı anahtarlar; .env git'e girmez
 ```
