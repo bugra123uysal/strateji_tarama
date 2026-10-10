@@ -249,7 +249,12 @@ gelecekteki getiriyi garanti etmez. Gerçek parayla işlem yapmadan önce kendi 
 
 ## Teşekkür ve lisans
 
-Strateji fikri: [FİNANS VE BORSA, “Yükseliş Trendine Giren Hisseleri En Erken Bulan Trade Stratejisi”](https://www.youtube.com/watch?v=3BhZCbNxs5A).
-Ajan iskeleti (koşu sürücüsü, bekçi, takım yapısı)
-[selmakcby/a-sirketi](https://github.com/selmakcby/a-sirketi) üzerine kuruldu ve tek bir strateji için
-yeniden yazıldı. [MIT](LICENSE) lisanslıdır.
+Bu projeyi iki kaynaktan öğrendiklerimle kurdum:
+
+- **Strateji:** [FİNANS VE BORSA, “Yükseliş Trendine Giren Hisseleri En Erken Bulan Trade Stratejisi”](https://www.youtube.com/watch?v=3BhZCbNxs5A)
+- **Ajan mimarisi:** [Selma Kocabıyık, “Şirketimde 13 Ajan Var, Maaş Ödemiyorum: Sıfırdan Kurulum”](https://www.youtube.com/watch?v=7XhX8P0ebEU).
+  Koşu sürücüsü, bekçi ve takım yapısının iskeleti açık kaynak
+  [a-sirketi](https://github.com/selmakcby/a-sirketi) reposundan alındı ve tek bir strateji için
+  yeniden yazıldı.
+
+[MIT](LICENSE) lisanslıdır.
