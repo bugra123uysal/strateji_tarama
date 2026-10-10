@@ -1,179 +1,255 @@
-![A Şirketi](docs/kapak.png)
+# Geri Çekilme Tarayıcısı
 
-# A Şirketi
+**ABD borsasında güçlü trenddeki hisselerin geri çekilmelerini her gün otomatik tarayan, kuralları
+koda bağlı bir sinyal panosu.** Sayıları deterministik Python hesaplar, bir Claude Code ajanı haberleri
+doğrular, sonuç tek bir HTML panoya düşer. Emir düğmesi her zaman insandadır.
 
-Üç Claude Code ajanı, bir bekçi, bir dağıtıcı — kapalı bir döngü. Telefonundan bota bir link atarsın;
-bir ajan iddiaları kaynağına kadar doğrular, zincir devralır, yayına hazır bir paket çıkar ve orada durur:
-**yayın düğmesi insanda.**
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Testler](https://img.shields.io/badge/testler-261%20ge%C3%A7ti-brightgreen) ![Strateji](https://img.shields.io/badge/strateji-v3%20%C2%B7%20k%C3%A2%C4%9F%C4%B1t%20i%C5%9Flem-orange) ![Lisans](https://img.shields.io/badge/lisans-MIT-lightgrey)
 
-Bu bir iskelettir, bir ürün değil. Klonla, `.env`'i doldur, kendi takımlarını yaz.
+---
 
-![Üç ajan ve bekçi](docs/4-ajan.png)
+## Problem
 
-## Videolar
+Takip ettiğim strateji basit: **güçlü bir hisse kısa süre düştüğünde, düşüş biterken girmek.**
+Ama bunu elle uygulamak mümkün değildi:
 
-Her bölümün kodu kendi etiketinde durur; `main` en güncel hâl.
+- Evren her gün değişiyor. Filtreye uyan 60 civarı hisse var ve her biri için grafiği açıp
+  RSI'ı, bantları, trendi, bilanço tarihini kontrol etmek her akşam saatler alıyordu.
+- Sinyal kapanmış güne bakıyor. Yani kontrolü ABD borsası kapandıktan sonra yapmak gerekiyor; bu
+  da Türkiye saatiyle gece yarısına denk geliyor. Bir akşam atlanınca sinyal kaçıyordu.
+- Elle taramada kurallar esniyor. "Stop biraz geniş ama olsun" ya da "haberi iyi, girerim" gibi
+  kararlar tutarlılığı bozuyordu.
+- Stop seviyesi, pozisyon adedi ve toplam risk gibi hesapları her seferinde elle yapmak hata riskini
+  artırıyordu.
 
-- Bölüm 1 — [Şirketimde 13 Ajan Var, Maaş Ödemiyorum: Sıfırdan Kurulum](https://www.youtube.com/watch?v=7XhX8P0ebEU) · kod o videodaki haliyle: [`bolum-1`](https://github.com/selmakcby/a-sirketi/tree/bolum-1)
-- Bölüm 2 — [Bir Ajan Nasıl Uyanır ve Ne Kadar Harcar? Şirketimin İçi](https://youtu.be/OhnKe-L5-lU) · kod: [`bolum-2`](https://github.com/selmakcby/a-sirketi/tree/bolum-2) — bu repodaki dosyalar tek tek açılıyor, YouTube ajanı Telegram'dan çalıştırılıyor, 40 cent'lik hata kamerada teşhis ediliyor.
-- Higgsfield API ile 3D ajan ofisi → [docs/higgsfield-ofis/](docs/higgsfield-ofis/)
+**Kısacası bütün hisseleri her gün elle tarayamıyordum. Bu sistemi bu yüzden kurdum.**
 
-## Üç takım
+## Çözüm
 
-| Takım | Anahtar | Akan şey |
-|---|---|---|
-| **x-icerik** | `TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` | Telegram'a attığın X linki → `gelen/*.json` → her iddia ✅/🟡/⛔ etiketli doğrulama tablosu + "yazıya değer mi" kararı (`cikti/YYYY-MM-DD-<update_id>-<hesap>.md`) |
-| **youtube-analiz** | `APIFY_TOKEN` · `KANAL` | Apify aktörleri → `veri/YYYY-Www.json` → yalnız o dosyadaki sayılarla kaynaklı haftalık rapor (`cikti/YYYY-Www-rapor.md`) |
-| **twitter-icerik** | — (`FAL_KEY` varsa kapak) | Dağıtıcının düşürdüğü `aci-<id>` maddesi → X Article paketi: `article.md`, `article.html`, `kapak.png` (`cikti/<tarih>-<slug>/`) |
+Taramayı, hesapları ve kural uygulamasını bir programa devrettim. Kararı ve emri kendimde tuttum.
 
-Her takım `takimlar/<takim>/` altında aynı dört dosyayla yaşar: `takim.md` (kim ve ne yapar),
-`kurallar.md` (neye göre), `defter.md` (ne öğrendi), `durum.json` (nerede). Her ajan koşuya aynı
-sırayla başlar: `ANAYASA.md` → `sirket/AJAN-KIMLIGI.md` → `takimlar/<takim>/kurallar.md` →
-`takim.md` → yetenekleri (`skills/<ad>/SKILL.md`).
+- **Günde iki kez kendiliğinden tarar:** borsa kapandıktan sonra (gün sonu) ve ertesi gün borsa
+  açılmadan önce (bkz. [Ne zaman tarar](#ne-zaman-tarar)).
+- **Bütün sayıları kod hesaplar.** RSI, Bollinger, ATR, stop, R, adet ve risk tavanları Python'da
+  deterministik olarak hesaplanır ve JSON'a yazılır. Yapay zekâ hiçbir sayı üretmez.
+- **Ajan yalnızca yorum yapar.** Adayların son haberlerini araştırır, bilanço tarihini doğrular,
+  "kırmızı bayrak" (dava, rehberlik düşürme, sulandırma vb.) arar. Bunlar kuralı değiştirmez,
+  panoya not olarak düşer.
+- **Bekçi her koşuyu denetler.** Panodaki her sayı o günün veri dosyasında birebir bulunmuyorsa,
+  ya da piyasa rejimi kırmızıyken bir aday "uygun" görünüyorsa koşu reddedilir ve düzeltilir.
+- **Sonuç tek bir sayfadır.** `pano.html` her zaman en güncel taramayı gösterir. Telefonda da okunur.
 
-## Döngü
+---
 
-```
-   sen                                bin/telegram_dinle.py
-  Telegram'a X linki  ───────────────►  (long-poll; mesaj düştüğü an)
-                                                  │
-                                       gelen/*.json + kuyruk: x-<update_id>
-                                                  │  mesai içiyse hemen koştur
-                                                  │  (dışındaysa sabah dağıtıcı alır)
-                                      ┌───────────▼───────────┐
-                                      │  bin/kos.py x-icerik  │
-                                      │  claude -p (sonnet)   │
-                                      │  tweet_cek + arama    │
-                                      │  ✅/🟡/⛔ tablosu      │
-                                      └───────────┬───────────┘
-                                                  │ Stop hook
-                                      ┌───────────▼───────────┐
-                                      │  bin/bekci.py         │
-                                      │  ön kontrol (LLM yok) │
-                                      │  + ayrı kafa denetimi │
-                                      └─────┬───────────┬─────┘
-                                       red  │           │ kabul
-                                   düzeltmeye           │
-                                    (en fazla 2)        ▼
-                                                  durum.json
-                                             kuyruk: x-<id> tamam
-                                                        │
-                                          bin/dagitici.py — zincir
-                                                        │
-                            twitter-icerik kuyruğu: aci-<id> bekliyor
-                                                        │
-                    tavanlar: mesai 09:00-23:00 · koşu 2 USD / 15 dk ·
-                    takım günde 4 koşu · şirket günde 10 USD (bin/ayar.py)
-                                                        │
-                                      bin/kos.py twitter-icerik
-                                                        │
-                                    cikti/<tarih>-<slug>/article.html
-                                                        │
-                                                       sen
-                                                 (yayın düğmesi)
-```
+## Kullanılan kombinasyon (Strateji v3)
 
-`youtube-analiz` aynı iskelette ayrı kulvarda döner: pazartesi sabahı `bin/gunluk.py --sabah`
-kuyruğa `yt-<hafta>` maddesini düşürür → Apify → `veri/*.json` → kaynaklı rapor.
+> **Stratejinin kaynağı:** fikri *FİNANS VE BORSA* kanalının
+> [“Yükseliş Trendine Giren Hisseleri En Erken Bulan Trade Stratejisi”](https://www.youtube.com/watch?v=3BhZCbNxs5A)
+> videosundan aldım. Bu projede yaptığım, o yaklaşımı ölçülebilir kurallara çevirmek, geri testle
+> sınamak ve taramasını otomatikleştirmek oldu.
 
-Aynı takımı **Telegram'dan da çağırabilirsin**: bota "youtube analizi yap" yazman yeter.
-Dinleyici gelen mesajı `takim_sec()` ile yönlendirir — içinde "youtube" geçen her mesaj
-(büyük/küçük harf farketmez, link olsun olmasın) `youtube-analiz` kuyruğuna `yt-<update_id>`
-maddesi düşürür ve mesai içindeysen pazartesiyi beklemeden hemen koşturur; takım o durumda
-veriyi tazeliğine bakmadan yeniden çeker ve raporu baştan yazar. "youtube" geçmeyen ama link
-taşıyan mesaj eskisi gibi `x-icerik`'e gider; ikisi de değilse hiçbir şey koşmaz. Ayrıntı:
-[docs/02-dongu.md](docs/02-dongu.md).
+Kuralların tamamı [`sirket/STRATEJI-v3.md`](sirket/STRATEJI-v3.md) dosyasındadır. Ajan bu dosyayı
+değiştiremez. Kural değişirse yeni bir sürüm dosyası açılır.
 
-## Kurulum — 6 adım
+### 1. Evren: hangi hisseler taranır
 
-Komut komut ayrıntılı hâli: **[KURULUM.md](KURULUM.md)**
+TradingView tarayıcı filtreleri, günde yaklaşık 55 ila 70 hisse:
 
-1. `git clone … && cd a-sirketi` · `cp .env.example .env` — anahtarları doldur (aşağıdaki tablo)
-2. `python3 bin/ayar.py` ve `python3 -m unittest discover -s tests` — iskelet ayakta mı
-3. `ANAYASA.md`'yi oku — beş madde, şirketin değişmez çerçevesi; istersen kendi maddelerini yaz
-4. Takımları tanı (`takimlar/*/takim.md`), sonra `python3 bin/agents_uret.py` ile
-   `.claude/agents/<takim>.md` dosyalarını üret
-5. Döngüyü kapat: `python3 bin/kos.py x-icerik --kuru` → Telegram'a link →
-   `python3 bin/telegram_oku.py --isle` → `python3 bin/kos.py x-icerik` → `python3 bin/dagitici.py`
-6. Sürekli çalıştır: `python3 bin/telegram_dinle.py` (olay tetiği) + `python3 bin/zamanla.py --kur` (sabah/akşam)
-
-## Anahtarlar (`.env`)
-
-`.env.example`'ı kopyalayıp doldurursun; `.env` `.gitignore`'un ilk satırındadır, git'e girmez.
-
-| Anahtar | Ne için | Yoksa ne olur |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | Bot gelen kutusu (@BotFather) | `x-icerik` koşmaz, "eksik anahtar" der |
-| `TELEGRAM_CHAT_ID` | Yalnızca senin mesajların işlensin | aynı |
-| `APIFY_TOKEN` | YouTube videoları + yorumları | `youtube-analiz` koşmaz |
-| `FAL_KEY` | 3840×736 kapak görseli | pakete "kapak: sen ekleyeceksin" notu düşer, koşu devam eder |
-| `OPENAI_API_KEY` | Bekçi — ayrı model ailesi (ANAYASA §3) | **yoksa ya da geçersizse** (401/403, ağ yok) yedek yol `claude -p --model haiku`; karar "bekçi aynı aileden — uyarı" notuyla kaydedilir |
-| `KANAL` | İzlenecek YouTube kanalı | `@ornek-kanal` varsayılır |
-| `NVIDIA_API_KEY` | Ajanı Anthropic yerine NVIDIA'nın bedava modeliyle koşturmak ([docs/07](docs/07-farkli-model.md)) | hiçbir şey değişmez; her takım Anthropic'te koşar |
-| `NIM_MODEL` | Koşacak NIM modeli (tool-use desteklemeli) | `takim.md`'deki `model:` satırı kullanılır; o da yoksa `saglayici: nim` koşusu atlanır |
-
-## Komutlar
-
-```bash
-python3 bin/ayar.py                          # mesai penceresi, tavanlar, kanal, .env var mı
-python3 bin/agents_uret.py [--check]         # takim.md → .claude/agents/<takim>.md (--check: sapma varsa 1)
-python3 bin/kos.py <takim>                   # bir takımı bir kez koştur
-python3 bin/kos.py <takim> --kuru            # claude çağırmadan akışı ve kurulan istemi bas
-python3 bin/kos.py <takim> --zorla           # mesai dışında elle koştur
-python3 bin/dagitici.py --kuru               # zinciri ve tetik kararlarını bas, hiçbir şey başlatma
-python3 bin/dagitici.py                      # zinciri kur, uygun takımları koştur
-python3 bin/bekci.py --dogrudan <takim> [kosu.md]   # hook dışından denetle, kararı JSON bas
-python3 bin/telegram_oku.py --chat-id-bul | --son 5 | --isle
-python3 bin/telegram_dinle.py [--bir-kez]    # olay tetiği: mesaj düştüğü an ilgili takım koşar
-python3 bin/gunluk.py --sabah [--kuru] | --aksam    # sabah dağıtıcı + rapor, akşam denetim
-python3 bin/zamanla.py --kuru | --kur | --durum | --kaldir   # launchd tetikleri (macOS)
-#   saatli tetik: macOS launchd · Linux cron (docs/02-dongu.md) · Windows WSL — kos.py POSIX fcntl kilidi kullanır
-python3 bin/tweet_cek.py <x-linki>
-python3 bin/youtube_analiz_cek.py --son-7g --yorum 50
-python3 bin/kapak_uret.py "<başlık>" cikti/kapak.png
-bin/takim-olustur.sh <yeni-takim>            # iskeletten yeni takım (dört dosya)
-python3 -m unittest discover -s tests        # reponun kendi testleri
-```
-
-## Neden böyle
-
-- **Ajan kim olduğunu bilir.** Koşu isteminin ve `.claude/agents/<takim>.md` dosyasının ilk satırı
-  şudur: "Sen `x-icerik` ajanısın. A Şirketi'nde bir çalışansın ve bir yapay zekâ ajanısın.
-  Mesleğin: …" — meslek `takim.md`'deki `description` alanıdır. Gerisini `sirket/AJAN-KIMLIGI.md`
-  anlatır: hafızası yok, patron kim, bekçi kim, dağıtıcı ne yapar, neyi asla yapmaz.
-- **Yetenek dosyaları.** Bir işin nasıl yapılacağı her koşuda baştan anlatılmaz; `skills/<ad>/SKILL.md`
-  bir kez yazılır, ajan **sadece ilgili adımda** okur. Hangi takımın hangi yeteneği var:
-  `takim.md` frontmatter'ındaki `skills: [...]` alanı; katalog `sirket/YETENEKLER.md`.
-  Her yeteneğin sonunda `## Öğrenilenler` var — ajan koşuda aldığı veriyle kendini geliştirir.
-- **Tek iskelet.** Dört dosya her takımda aynı yerde; yeni takım açmak `bin/takim-olustur.sh` ile
-  kopyala-yapıştır.
-- **Kural dosyada, kodda değil.** Ne yapılacağı `takim.md`'de, neye göre yapılacağı `kurallar.md`'de,
-  zincir `bin/dagitici.py`'deki `ZINCIR` tablosunda. Kod yalnızca sürücüdür.
-- **Bekçi ayrı süreçte.** Üretenin kendi kendini onaylaması yasak. Denetim Stop hook'ta, ayrı süreçte,
-  tercihen ayrı model ailesinde. İlk katman LLM'siz ön kontroldür: koşu kaydında anahtar, token ya da
-  e-posta deseni varsa karar doğrudan `red`.
-- **Tetik saat değil, olay.** Takımı başlatan şey bir zamanlayıcı değil, bota düşen mesaj
-  (`bin/telegram_dinle.py`) — hangi takım olduğunu mesajın kendisi söyler. Saatli tetik yalnız
-  sabah dağıtıcıyı ve akşam denetimi koşturur.
-- **Tavan her yerde.** Para, süre, koşu sayısı ve mesai penceresi tek dosyada (`bin/ayar.py`);
-  tavana çarpan koşu sessiz ölmez, `durum.json`'a yazar.
-- **Yayın insanda.** Şirket taslağa kadar gider, orada durur.
-
-## Belgeler
-
-| Dosya | Ne anlatır |
+| Filtre | Koşul |
 |---|---|
-| [docs/01-nasil-calisir.md](docs/01-nasil-calisir.md) | Mimari: dört dosya, okuma sırası, `bin/kos.py` ne yapar |
-| [docs/02-dongu.md](docs/02-dongu.md) | Tetikler, dağıtıcı ve zincir, tavanlar |
-| [docs/03-bekci.md](docs/03-bekci.md) | Bekçi: ön kontrol, ayrı kafa, red akışı |
-| [docs/04-yetenekler.md](docs/04-yetenekler.md) | `skills/` — ne, neden, nasıl bağlanır |
-| [docs/05-yeni-takim.md](docs/05-yeni-takim.md) | Sıfırdan yeni takım açmak |
-| [docs/06-sorun-giderme.md](docs/06-sorun-giderme.md) | Sık çıkan hatalar ve okunacak dosya |
-| [docs/07-farkli-model.md](docs/07-farkli-model.md) | Ajanı Anthropic yerine NVIDIA'nın bedava modeliyle koşturmak (+ güvenlik notu) |
-| [docs/ornek-kosu/](docs/ornek-kosu/) | Gerçek bir koşunun kaydı ve çıktısı |
-| [prompts/](prompts/) | Şirketi sıfırdan kurmak için Claude Code'a sırayla verilen prompt'lar (P0–P12) |
-| [ANAYASA.md](ANAYASA.md) · [CLAUDE.md](CLAUDE.md) | Beş madde · projenin kimliği |
+| Piyasa | ABD: S&P 500, Nasdaq 100, Dow Jones, Nasdaq Composite, Russell 2000 |
+| Piyasa değeri | > 2 milyar $ |
+| Analist notu | "Al" veya "Güçlü al" |
+| 1 yıllık performans | > %30 |
+| Günlük trend | Fiyat > EMA100 ve Fiyat > EMA200 |
+| Haftalık trend | Fiyat > EMA50 ve Fiyat > EMA21 |
+| Hacim | 90 günlük ort. hacim > 10 günlük ort. hacim |
+| Oynaklık | ADR > %3,5 |
 
-## Lisans
+### 2. Giriş sinyali: RSI Bollinger dönüşü
 
-MIT — bkz. [LICENSE](LICENSE).
+RSI'ın kendisine Bollinger bandı uygulanır:
+
+```
+rsi   = RSI(kapanış, 14)            # Wilder, TradingView ta.rsi ile aynı
+orta  = SMA(rsi, 14)
+alt   = orta − 2 × stdev(rsi, 14)   # popülasyon stdev, TradingView ta.stdev ile aynı
+mesafe = rsi − alt
+```
+
+- **Bölgede:** dünkü kapanışta `mesafe ≤ 2` (RSI alt banda değmiş ya da altına geçmiş).
+- **Dönüş:** dün RSI dip yaptı, bugün yukarı döndü.
+- **Tip:** son 5 barda RSI bandın altına geçtiyse `ALTINA_GEÇTİ`, geçmediyse `DOKUNDU`. İki tip
+  ayrı gösterilir ve ayrı ölçülür.
+
+### 3. Eleme: sinyal var ama işleme uygun mu?
+
+| Filtre | Kural |
+|---|---|
+| Piyasa rejimi | SPY < SMA200 ise rejim KIRMIZI olur ve o gün hiçbir aday uygun sayılmaz |
+| Trend (v3) | Fiyat > EMA200 **ve** EMA50 > EMA200 olmalı. Fiyat > EMA100 ise "GÜÇLÜ TREND" |
+| Bilanço | Bilançoya 5 işlem gününden az kaldıysa elenir |
+| Stop genişliği | Stop girişin %8'inden uzaksa elenir |
+| Günlük sınır | En fazla 3 uygun aday seçilir (stop % en küçük olanlar), kalanlar "yedek" olur |
+| Portföy tavanı | En fazla 5 açık pozisyon ve en fazla %5 toplam açık risk |
+
+### 4. Seviyeler ve risk
+
+```
+giriş referansı = sinyal günü kapanışı   (gerçek giriş ertesi gün açılışta, elle)
+stop            = giriş − 1,5 × ATR(14)  (yalnız yukarı taşınır)
+R               = giriş − stop
+adet            = ⌊ (portföy × %1) ÷ R ⌋
+2R seviyesi     = giriş + 2R             (bilgi amaçlı)
+```
+
+### 5. Çıkış
+
+Hangisi önce gelirse: **stop** · **RSI orta bandın üstüne çıkar (asıl hedef)** · **15 işlem günü
+doldu** · **bilançodan önceki son işlem günü**.
+
+---
+
+## Ne zaman tarar
+
+Pazartesi ile cuma arası günde iki kez çalışır. Saatler **New York saatine** bağlıdır, bu yüzden yaz ve kış
+saati geçişinde elle ayar gerekmez. Zamanlayıcı Windows Görev Zamanlayıcısı'dır (`bin/zamanla.py`).
+
+| Koşu | New York | TSİ (yaz / kış) | Ne yapar |
+|---|---|---|---|
+| **Gün sonu (kapanış)** | 16:15 | 23:15 / 00:15 | Kapanmış günlük barla bütün evreni tarar, sinyalleri hesaplar, yarının aday listesini ve açık pozisyonların çıkış kontrolünü yazar |
+| **Açılış öncesi** | 09:00 | 16:00 / 17:00 | Yeni sinyal hesaplamaz. Önceki akşamın adaylarına premarket fiyatı ve gece haberleriyle tekrar bakar: stop altında açılış "GAP, girilmez", 2R üstünde açılış "kaçtı, kovalanmaz" |
+| Haftalık günlük | Pazartesi 09:30 TSİ | | Kapanmış işlemlerden istatistik çıkarır ve geri testle kıyaslar |
+
+Gün içinde tarama yapılmaz. Sinyal kapanmış bara göre tanımlı. Yarım barda RSI sürekli değişir ve
+sinyal görünüp kaybolur. ABD tatil günlerinde betik "YENİ BAR YOK" der ve koşu erken biter.
+
+---
+
+## Nasıl çalışır
+
+```mermaid
+flowchart LR
+    Z[Görev Zamanlayıcı<br/>16:15 / 09:00 NY] --> K[bin/kos.py<br/>koşu sürücüsü]
+    K --> T[bin/tarama_cek.py<br/>TradingView tarayıcı + yfinance]
+    T --> V[(veri/GG.json<br/>tüm sayılar)]
+    V --> A[gc-tarama ajanı<br/>haber · bilanço · bayrak]
+    A --> N[(notlar/GG.json<br/>yalnız metin)]
+    V --> P[bin/pano_yaz.py]
+    N --> P
+    P --> H[cikti/pano.html]
+    H --> B{bekçi<br/>bin/bekci.py}
+    B -- red --> A
+    B -- onay --> I[👤 İnsan karar verir]
+```
+
+**Temel ilke: sayıyı kod hesaplar, ajan yorumlar.** Ajan veri JSON'unu ve panoyu elle düzenleyemez.
+Panodaki bütün sayıları `pano_yaz.py` veri dosyasından olduğu gibi basar.
+
+### Pano
+
+`takimlar/gc-tarama/cikti/pano.html`. Tek dosyadır, dış bağımlılığı yoktur ve koyu temalıdır.
+
+1. **Üst şerit:** tarih, strateji sürümü, SPY/QQQ rejim çipleri, evren ve sinyal sayısı, açık risk
+2. **Açık pozisyonlar:** çıkış koşulu oluşanlar en üstte, sebebiyle birlikte
+3. **İşleme uygun adaylar (en fazla 3):** sinyal tipi, giriş, stop, R, adet, 2R, bilanço tarihi,
+   etiketli haber notu ve TradingView grafik bağlantısı
+4. **Yedekler ve elenenler:** her biri eleme sebebiyle
+
+Hiç sinyal olmayan günlerde panoda "Bugün kurala uyan aday yok." yazar.
+
+---
+
+## Geri test: dürüst tablo
+
+Beş yıllık geri test (`bin/geri_test.py`, `bin/geri_deney.py`) canlı taramayla **aynı hesap
+fonksiyonlarını** kullanır, kod kopyalanmaz. Komisyon sonrası net beklenti:
+
+| Evren | İşlem | Kazanma | Beklenti (R, net) | `ALTINA_GEÇTİ` | `DOKUNDU` |
+|---|---|---|---|---|---|
+| Bugünkü güçlü hisseler (2021–2026) | 709 | %56,0 | **+0,046** | +0,075 | +0,002 |
+| O günkü evren (her gün filtreyi geçenler) | 1711 | %55,9 | **−0,003** | −0,010 | +0,005 |
+
+**Okuma:** bugünkü evrenin sonucu hayatta kalma yanlılığı yüzünden olduğundan iyi görünüyor. Yanlılığı
+azaltan "o günkü evren" testinde beklenti sıfıra yakın çıkıyor. Bu yüzden strateji **kâğıt işlem
+dönemindedir.** Gerçek para ancak 8 haftalık kâğıt işlem pozitif sonuç verirse ve benim kararımla
+kullanılır. Raporlar [`geri-test/`](geri-test/) klasöründe, sürüm kararları
+[`kasa/decisions/`](kasa/decisions/) klasöründe.
+
+---
+
+## Kurulum
+
+**Gereksinimler:** Windows 10/11, Python 3.10+, giriş yapılmış [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI.
+
+```powershell
+git clone https://github.com/bugra123uysal/geri-cekilme-tarayicisi.git
+cd geri-cekilme-tarayicisi
+python -m pip install --user -r requirements.txt
+copy .env.example .env      # isteğe bağlı anahtarlar; .env git'e girmez
+```
+
+Portföy büyüklüğü, komisyon ve evren eşikleri tek yerde durur: [`bin/ayar.py`](bin/ayar.py).
+
+## Kullanım
+
+```powershell
+# Veriyi elle çek (LLM çağırmaz)
+python bin/tarama_cek.py --kapanis        # gün sonu taraması
+python bin/tarama_cek.py --acilis         # açılış öncesi kontrol
+python bin/pano_yaz.py                    # panoyu yeniden üret
+
+# Ajanlı tam koşu
+python bin/kos.py gc-tarama --gorev kapanis
+python bin/kos.py gc-tarama --kuru        # hiçbir şeye dokunmadan prova
+
+# Zamanlayıcı (Windows Görev Zamanlayıcı)
+python bin/zamanla.py --goster            # NY → TSİ tetik tablosu
+python bin/zamanla.py --kur | --durum | --kaldir
+
+# Geri test ve günlük
+python bin/geri_test.py --yil 5
+python bin/geri_deney.py --yil 5
+python bin/gunluk_hesap.py
+
+# Testler
+python -m pytest -q
+```
+
+Açık pozisyonlar `pozisyonlar.csv` dosyasından, kapanmış işlemler `islemler.csv` dosyasından okunur.
+İkisi de kişisel veridir ve repoya girmez.
+
+## Klasör yapısı
+
+```
+bin/                    tarama_cek.py · pano_yaz.py · gc_hesap.py (ortak hesap modülü)
+                        geri_test.py · geri_deney.py · gunluk_hesap.py
+                        kos.py (koşu sürücüsü) · bekci.py (denetçi) · zamanla.py · ayar.py
+sirket/STRATEJI-v*.md   strateji sürümleri: değişmez, yenisi açılır
+takimlar/gc-tarama/     tarama takımı: takim.md · kurallar.md · defter.md · cikti/ (pano)
+takimlar/gc-gunluk/     haftalık işlem günlüğü takımı
+geri-test/              geri test raporları
+kasa/                   Obsidian hafızası: strateji kararları, haftalık özetler, kavramlar
+tests/                  birim testleri (RSI/Bollinger TradingView değerleriyle doğrulanır)
+ANAYASA.md              değişmez çerçeve: emir insanda, kaynaksız sayı yok, risk tavanları
+```
+
+## Güvenlik ilkeleri
+
+- **Emir düğmesi insanındır.** Hiçbir bileşen aracı kuruma bağlanmaz, emir göndermez,
+  TradingView'da alarm ya da çizim oluşturmaz.
+- **Kaynaksız sayı yoktur.** Panodaki her sayı veri dosyasında birebir bulunur ve bekçi bunu denetler.
+- **Strateji sürümlüdür.** Ajan kuralı esnetemez. Önerisini yalnızca `defter.md` dosyasına yazabilir.
+- **Anahtarlar** yalnızca süreç ortamından okunur. `.env` dosyası git'e girmez.
+
+## Sorumluluk reddi
+
+Bu proje kişisel bir kural uygulayıcısıdır, **yatırım tavsiyesi değildir.** Geri test sonuçları
+gelecekteki getiriyi garanti etmez. Gerçek parayla işlem yapmadan önce kendi araştırmanızı yapın.
+
+## Teşekkür ve lisans
+
+Strateji fikri: [FİNANS VE BORSA, “Yükseliş Trendine Giren Hisseleri En Erken Bulan Trade Stratejisi”](https://www.youtube.com/watch?v=3BhZCbNxs5A).
+Ajan iskeleti (koşu sürücüsü, bekçi, takım yapısı)
+[selmakcby/a-sirketi](https://github.com/selmakcby/a-sirketi) üzerine kuruldu ve tek bir strateji için
+yeniden yazıldı. [MIT](LICENSE) lisanslıdır.
